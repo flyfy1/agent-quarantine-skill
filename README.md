@@ -5,7 +5,8 @@
 ## 中文
 
 这是一个面向 Codex 和 Claude Code 的公开 Skill。在安装或更新第三方 Skill 前，
-它会调用 Agent Quarantine REST API；只有 API 明确返回
+它会调用 Agent Quarantine REST API。相同 repo、git hash 和 Skill 路径已经完成验证时，
+API 会直接返回缓存结果；尚未验证时，API 返回异步任务，客户端自动轮询。只有 API 明确返回
 `decision: "allow"` 且 `installAllowed: true` 时，Agent 才能继续安装。
 
 它不依赖 MCP，也不会把本地文件上传到平台。API 请求只包含公开 GitHub URL、
@@ -93,11 +94,26 @@ Content-Type: application/json
 Agent 必须同时检查 HTTP 成功、`decision === "allow"` 和
 `installAllowed === true`。API 不可达不代表安全，必须 fail closed。
 
+首次提交可能返回：
+
+```json
+{
+  "jobId": "check-...",
+  "checkStatus": "queued",
+  "pollUrl": "/api/v1/skill-checks/check-...",
+  "retryAfterSeconds": 2
+}
+```
+
+客户端使用相同 Bearer key 对 `pollUrl` 发起 `GET`，直到拿到最终决定。
+
 ## English
 
 This public Skill gates third-party Codex and Claude Code Skill installations
-through the Agent Quarantine REST API. Installation continues only when the API
-returns both `decision: "allow"` and `installAllowed: true`.
+through the Agent Quarantine REST API. Completed revisions return immediately;
+new revisions return a pollable job that the client follows automatically.
+Installation continues only when the API returns both `decision: "allow"` and
+`installAllowed: true`.
 
 Install the directory at
 `skills/agent-quarantine-preinstall` into `~/.codex/skills/` or

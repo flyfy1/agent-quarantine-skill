@@ -30,15 +30,17 @@ Never print, persist, or pass the API key as a command-line argument.
    ```
 
    Omit `skill-path` when the GitHub URL already contains `/tree/<ref>/<path>`.
-4. Read the JSON summary and the process exit code.
-5. Continue with the user's requested installation only when the exit code is `0`,
+4. The client follows same-origin `pollUrl` responses until the API returns a final result.
+5. Read the JSON summary and the process exit code.
+6. Continue with the user's requested installation only when the exit code is `0`,
    `decision` is `allow`, and `installAllowed` is `true`.
-6. For every other result, do not install or enable the target Skill. Report the
+7. For every other result, do not install or enable the target Skill. Report the
    decision, reason, check ID, scan run ID, and risk score when present.
 
 The client sends only the public GitHub source, optional Skill path, client name,
-and optional session ID to `POST /api/v1/skill-checks`. It does not upload local
-files or repository contents.
+and optional session ID to `POST /api/v1/skill-checks`. A cached revision returns
+immediately. A new revision returns an asynchronous job that the client polls with
+`GET` using the same API key. It does not upload local files or repository contents.
 
 ## Fail closed
 

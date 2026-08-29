@@ -84,6 +84,83 @@ test("denies review decisions with exit code 3", async () => {
   assert.equal(JSON.parse(result.stdout).decision, "review");
 });
 
+test("polls an accepted check until the final allow decision", async () => {
+  let polls = 0;
+  const result = await withApi((request, response) => {
+    if (request.method === "POST") {
+      jsonResponse(response, 202, {
+        jobId: "check-async",
+        checkStatus: "queued",
+        pollUrl: "/api/v1/skill-checks/check-async",
+        retryAfterSeconds: 0,
+      });
+      return;
+    }
+    assert.equal(request.url, "/api/v1/skill-checks/check-async");
+    assert.equal(request.headers.authorization, "Bearer aq_test_key");
+    polls += 1;
+    if (polls === 1) {
+      jsonResponse(response, 202, {
+        jobId: "check-async",
+        checkStatus: "running",
+        pollUrl: "/api/v1/skill-checks/check-async",
+        retryAfterSeconds: 0,
+      });
+      return;
+    }
+    jsonResponse(response, 200, {
+      jobId: "check-async",
+      checkStatus: "complete",
+      cached: false,
+      checkId: "skill-async",
+      decision: "allow",
+      installAllowed: true,
+      reason: "Sandbox verification passed",
+      report: { scanRunId: "run-async", riskScore: 8, findings: [] },
+    });
+  }, (apiUrl) => runGate(apiUrl));
+
+  assert.equal(result.code, 0);
+  assert.equal(polls, 2);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    jobId: "check-async",
+    checkStatus: "complete",
+    cached: false,
+    checkId: "skill-async",
+    decision: "allow",
+    installAllowed: true,
+    reason: "Sandbox verification passed",
+    report: {
+      scanRunId: "run-async",
+      riskScore: 8,
+      findings: [],
+    },
+  });
+});
+
+test("fails closed when an asynchronous sandbox job fails", async () => {
+  const result = await withApi((request, response) => {
+    if (request.method === "POST") {
+      jsonResponse(response, 202, {
+        jobId: "check-failed",
+        checkStatus: "queued",
+        pollUrl: "/api/v1/skill-checks/check-failed",
+        retryAfterSeconds: 0,
+      });
+      return;
+    }
+    jsonResponse(response, 200, {
+      jobId: "check-failed",
+      checkStatus: "failed",
+      installAllowed: false,
+      error: "Sandbox startup failed",
+    });
+  }, (apiUrl) => runGate(apiUrl));
+
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /Sandbox startup failed/);
+});
+
 test("fails closed on authentication or quota errors", async () => {
   const result = await withApi((_request, response) => jsonResponse(response, 401, {
     error: "Invalid or missing API key",

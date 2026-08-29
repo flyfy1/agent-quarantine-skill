@@ -51,6 +51,9 @@ function timeoutMilliseconds() {
 function resultSummary(result) {
   const report = result?.report;
   return {
+    jobId: result?.jobId,
+    checkStatus: result?.checkStatus,
+    cached: result?.cached,
     checkId: result?.checkId,
     decision: result?.decision,
     installAllowed: result?.installAllowed,
@@ -73,6 +76,32 @@ function resultSummary(result) {
       })) : undefined,
     } : undefined,
   };
+}
+
+async function fetchJson(url, options, signal) {
+  const response = await fetch(url, { ...options, signal });
+  const text = await response.text();
+  let result;
+  try {
+    result = JSON.parse(text);
+  } catch {
+    throw new Error(`API returned non-JSON content (HTTP ${response.status})`);
+  }
+  return { response, result };
+}
+
+function wait(milliseconds, signal) {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 async function main() {
@@ -99,7 +128,7 @@ async function main() {
   let response;
   let result;
   try {
-    response = await fetch(endpoint, {
+    ({ response, result } = await fetchJson(endpoint, {
       method: "POST",
       headers: {
         authorization: `Bearer ${apiKey}`,
@@ -114,13 +143,25 @@ async function main() {
             : {}),
         },
       }),
-      signal: controller.signal,
-    });
-    const text = await response.text();
-    try {
-      result = JSON.parse(text);
-    } catch {
-      throw new Error(`API returned non-JSON content (HTTP ${response.status})`);
+    }, controller.signal));
+
+    while (response.status === 202) {
+      if (typeof result?.pollUrl !== "string" || !result.pollUrl) {
+        throw new Error("API accepted the check without a pollUrl");
+      }
+      const pollEndpoint = new URL(result.pollUrl, endpoint);
+      if (pollEndpoint.origin !== new URL(endpoint).origin) {
+        throw new Error("API returned a cross-origin pollUrl");
+      }
+      const retryAfter = Number(result.retryAfterSeconds ?? response.headers.get("retry-after") ?? 2);
+      const delayMs = Number.isFinite(retryAfter)
+        ? Math.min(Math.max(retryAfter * 1000, 0), 30_000)
+        : 2_000;
+      await wait(delayMs, controller.signal);
+      ({ response, result } = await fetchJson(pollEndpoint, {
+        method: "GET",
+        headers: { authorization: `Bearer ${apiKey}` },
+      }, controller.signal));
     }
   } catch (error) {
     const message = error instanceof Error && error.name === "AbortError"
@@ -136,6 +177,11 @@ async function main() {
     deny(typeof result?.error === "string" ? result.error : `API request failed (HTTP ${response.status})`, {
       status: response.status,
     });
+    return;
+  }
+
+  if (result?.checkStatus === "failed") {
+    deny(typeof result.error === "string" ? result.error : "Sandbox check failed");
     return;
   }
 
