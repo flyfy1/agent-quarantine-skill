@@ -1,0 +1,3 @@
+interface:
+  display_name: "Agent Quarantine Preinstall"
+  short_description: "Check third-party Skills through the REST API before install"
